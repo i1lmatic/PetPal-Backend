@@ -3,9 +3,9 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func
+from sqlalchemy import func, inspect, text
 from typing import List
-from datetime import timedelta, date, datetime
+from datetime import date, datetime
 import os
 
 from . import models, schemas, auth, database
@@ -37,6 +37,24 @@ async def lifespan(app: FastAPI):
             db.close()
     except Exception as e:
         print(f">>> No se pudo crear sesión de DB para seed: {e}")
+
+    # Auto-migracion: agregar columnas faltantes
+    try:
+        mig_db = SessionLocal()
+        inspector = inspect(engine)
+        columns = [c["name"] for c in inspector.get_columns("medical_records")]
+        if "appointment_id" not in columns:
+            mig_db.execute(text("ALTER TABLE medical_records ADD COLUMN appointment_id INTEGER REFERENCES appointments(id)"))
+            mig_db.commit()
+            print(">>> Columna appointment_id agregada a medical_records")
+        mig_db.close()
+    except Exception as e:
+        try:
+            mig_db.close()
+        except:
+            pass
+        print(f">>> Auto-migracion omitida: {e}")
+
     yield
 
 app = FastAPI(title="PetPal API", lifespan=lifespan)
