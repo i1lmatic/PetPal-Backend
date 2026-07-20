@@ -84,6 +84,7 @@ class AppointmentOut(AppointmentBase):
     status: str
     owner_name: Optional[str] = None
     pet_name: Optional[str] = None
+    has_record: bool = False
 
     class Config:
         from_attributes = True
@@ -98,7 +99,7 @@ class MedicalRecordBase(BaseModel):
     notes: str
 
 class MedicalRecordCreate(MedicalRecordBase):
-    pass
+    appointment_id: Optional[int] = None
 
 class MedicalRecordOut(MedicalRecordBase):
     id: int

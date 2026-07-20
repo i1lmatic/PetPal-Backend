@@ -67,9 +67,11 @@ class MedicalRecord(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     pet_id = Column(Integer, ForeignKey("pets.id"))
+    appointment_id = Column(Integer, ForeignKey("appointments.id"), nullable=True)
     date = Column(DateTime)
     diagnosis = Column(String)
     treatment = Column(String)
     notes = Column(String)
 
     pet = relationship("Pet", back_populates="medical_records")
+    appointment = relationship("Appointment", backref="medical_record")

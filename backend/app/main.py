@@ -228,11 +228,15 @@ def get_all_appointments(
     for a in appointments:
         owner = a.owner
         pet = a.pet
+        has_record = db.query(models.MedicalRecord).filter(
+            models.MedicalRecord.appointment_id == a.id
+        ).first() is not None
         result.append(schemas.AppointmentOut(
             id=a.id, pet_id=a.pet_id, owner_id=a.owner_id, date_time=a.date_time,
             reason=a.reason, status=a.status,
             owner_name=owner.full_name if owner else None,
-            pet_name=pet.name if pet else None
+            pet_name=pet.name if pet else None,
+            has_record=has_record
         ))
     return result
 
@@ -249,8 +253,12 @@ def create_medical_record(
     
     from datetime import datetime
     new_record = models.MedicalRecord(
-        **record.dict(),
-        date=datetime.utcnow()
+        pet_id=record.pet_id,
+        diagnosis=record.diagnosis,
+        treatment=record.treatment,
+        notes=record.notes,
+        date=datetime.utcnow(),
+        appointment_id=record.appointment_id
     )
     db.add(new_record)
     db.commit()
