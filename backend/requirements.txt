@@ -7,3 +7,5 @@ python-jose[cryptography]
 python-multipart
 python-dotenv
 gunicorn
+email-validator
+email-validator
