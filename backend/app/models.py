@@ -11,6 +11,7 @@ class UserStatus(str, enum.Enum):
     PENDING = "pending"
     ACTIVE = "active"
     INACTIVE = "inactive"
+    REJECTED = "rejected"
 
 class AppointmentStatus(str, enum.Enum):
     PENDING = "pending"

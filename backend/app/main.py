@@ -114,6 +114,21 @@ def approve_user(
     db.refresh(user)
     return user
 
+@app.delete("/admin/users/{user_id}/reject", response_model=schemas.UserOut)
+def reject_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(auth.get_current_user)
+):
+    auth.check_admin(admin)
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    user.status = models.UserStatus.REJECTED
+    db.commit()
+    db.refresh(user)
+    return user
+
 @app.get("/admin/appointments", response_model=List[schemas.AppointmentOut])
 def get_all_appointments(
     db: Session = Depends(get_db), 
