@@ -1,16 +1,48 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from typing import List
 from datetime import timedelta
+import os
 
 from . import models, schemas, auth, database
-from .database import engine, get_db
+from .database import engine, get_db, SessionLocal
 
-# Crear tablas en SQLite
-models.Base.metadata.create_all(bind=engine)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    models.Base.metadata.create_all(bind=engine)
+    try:
+        db = SessionLocal()
+        try:
+            existing = db.query(models.User).filter(models.User.role == models.UserRole.ADMIN).first()
+            if not existing:
+                admin_user = models.User(
+                    email=os.environ.get("ADMIN_EMAIL", "admin@petpal.com"),
+                    hashed_password=auth.get_password_hash(os.environ.get("ADMIN_PASSWORD", "admin123")),
+                    full_name="Administrador",
+                    phone="000000000",
+                    role=models.UserRole.ADMIN,
+                    status=models.UserStatus.ACTIVE
+                )
+                db.add(admin_user)
+                db.commit()
+                print(">>> Admin default creado")
+        except Exception as e:
+            db.rollback()
+            print(f">>> Seed admin omitido (posible BD ya poblada): {e}")
+        finally:
+            db.close()
+    except Exception as e:
+        print(f">>> No se pudo crear sesión de DB para seed: {e}")
+    yield
 
-app = FastAPI(title="PetPal API")
+app = FastAPI(title="PetPal API", lifespan=lifespan)
+
+@app.get("/", include_in_schema=False)
+def root():
+    return RedirectResponse(url="/docs")
 
 # --- AUTH ENDPOINTS ---
 
@@ -21,15 +53,15 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Email ya registrado")
     
     hashed_pwd = auth.get_password_hash(user.password)
-    # El primer usuario podría ser admin para facilitar las pruebas, 
-    # pero por ahora todos son clientes pendientes
+    existing_admin = db.query(models.User).filter(models.User.role == models.UserRole.ADMIN).first()
+    is_first_user = existing_admin is None
     new_user = models.User(
         email=user.email,
         hashed_password=hashed_pwd,
         full_name=user.full_name,
         phone=user.phone,
-        role=models.UserRole.CLIENT,
-        status=models.UserStatus.PENDING
+        role=models.UserRole.ADMIN if is_first_user else models.UserRole.CLIENT,
+        status=models.UserStatus.ACTIVE if is_first_user else models.UserStatus.PENDING
     )
     db.add(new_user)
     db.commit()
@@ -110,6 +142,31 @@ def create_medical_record(
     db.commit()
     db.refresh(new_record)
     return new_record
+
+@app.patch("/admin/appointments/{appointment_id}/status", response_model=schemas.AppointmentOut)
+def update_appointment_status(
+    appointment_id: int,
+    update: schemas.AppointmentUpdateStatus,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(auth.get_current_user)
+):
+    auth.check_admin(admin)
+    appointment = db.query(models.Appointment).filter(models.Appointment.id == appointment_id).first()
+    if not appointment:
+        raise HTTPException(status_code=404, detail="Cita no encontrada")
+
+    new_status = update.status
+    allowed = [
+        models.AppointmentStatus.CONFIRMED,
+        models.AppointmentStatus.CANCELLED,
+        models.AppointmentStatus.COMPLETED
+    ]
+    if new_status not in allowed:
+        raise HTTPException(status_code=400, detail=f"Estado invalido. Permitidos: {[s.value for s in allowed]}")
+    appointment.status = new_status
+    db.commit()
+    db.refresh(appointment)
+    return appointment
 
 # --- CLIENT ENDPOINTS (Mascotas y Citas) ---
 

@@ -62,6 +62,9 @@ class AppointmentOut(AppointmentBase):
     class Config:
         from_attributes = True
 
+class AppointmentUpdateStatus(BaseModel):
+    status: str
+
 class MedicalRecordBase(BaseModel):
     pet_id: int
     diagnosis: str
