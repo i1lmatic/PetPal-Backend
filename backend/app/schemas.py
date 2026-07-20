@@ -10,6 +10,10 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str
 
+class UserUpdateProfile(BaseModel):
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
+
 class UserUpdateStatus(BaseModel):
     status: str
 
@@ -17,6 +21,18 @@ class UserOut(UserBase):
     id: int
     role: str
     status: str
+
+    class Config:
+        from_attributes = True
+
+class UserDetail(BaseModel):
+    id: int
+    email: str
+    full_name: str
+    phone: str
+    role: str
+    status: str
+    pets: List["PetOut"] = []
 
     class Config:
         from_attributes = True
@@ -46,6 +62,14 @@ class PetOut(PetBase):
     class Config:
         from_attributes = True
 
+class PetWithOwner(PetBase):
+    id: int
+    owner_id: int
+    owner_name: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
 class AppointmentBase(BaseModel):
     pet_id: int
     date_time: datetime
@@ -58,6 +82,8 @@ class AppointmentOut(AppointmentBase):
     id: int
     owner_id: int
     status: str
+    owner_name: Optional[str] = None
+    pet_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -80,3 +106,11 @@ class MedicalRecordOut(MedicalRecordBase):
 
     class Config:
         from_attributes = True
+
+class DashboardStats(BaseModel):
+    total_users: int = 0
+    total_pets: int = 0
+    total_appointments: int = 0
+    appointments_today: int = 0
+    pending_appointments: int = 0
+    pending_users: int = 0

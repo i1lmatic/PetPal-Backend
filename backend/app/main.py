@@ -2,9 +2,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import RedirectResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func
 from typing import List
-from datetime import timedelta
+from datetime import timedelta, date, datetime
 import os
 
 from . import models, schemas, auth, database
@@ -50,6 +51,8 @@ def root():
 def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db_user = db.query(models.User).filter(models.User.email == user.email).first()
     if db_user:
+        if db_user.status == models.UserStatus.REJECTED:
+            raise HTTPException(status_code=400, detail="Esta cuenta fue rechazada. Contacte al administrador.")
         raise HTTPException(status_code=400, detail="Email ya registrado")
     
     hashed_pwd = auth.get_password_hash(user.password)
@@ -86,6 +89,20 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
 
 @app.get("/users/me", response_model=schemas.UserOut)
 def read_users_me(current_user: models.User = Depends(auth.get_current_user)):
+    return current_user
+
+@app.patch("/users/me", response_model=schemas.UserOut)
+def update_my_profile(
+    update: schemas.UserUpdateProfile,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user)
+):
+    if update.full_name is not None:
+        current_user.full_name = update.full_name
+    if update.phone is not None:
+        current_user.phone = update.phone
+    db.commit()
+    db.refresh(current_user)
     return current_user
 
 # --- ADMIN ENDPOINTS ---
@@ -129,13 +146,95 @@ def reject_user(
     db.refresh(user)
     return user
 
+@app.get("/admin/users/active", response_model=List[schemas.UserOut])
+def get_active_users(
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(auth.get_current_user)
+):
+    auth.check_admin(admin)
+    return db.query(models.User).filter(models.User.status == models.UserStatus.ACTIVE).all()
+
+@app.get("/admin/users/{user_id}", response_model=schemas.UserDetail)
+def get_user_detail(
+    user_id: int,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(auth.get_current_user)
+):
+    auth.check_admin(admin)
+    user = db.query(models.User).options(joinedload(models.User.pets)).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    return user
+
+@app.get("/admin/pets", response_model=List[schemas.PetWithOwner])
+def get_all_pets(
+    search: str = "",
+    owner_id: int = None,
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(auth.get_current_user)
+):
+    auth.check_admin(admin)
+    query = db.query(models.Pet).join(models.User)
+    if search:
+        query = query.filter(models.Pet.name.ilike(f"%{search}%"))
+    if owner_id is not None:
+        query = query.filter(models.Pet.owner_id == owner_id)
+    pets = query.all()
+    return [
+        schemas.PetWithOwner(
+            id=p.id,
+            owner_id=p.owner_id,
+            name=p.name,
+            species=p.species,
+            breed=p.breed,
+            birth_date=p.birth_date,
+            weight=p.weight,
+            photo_url=p.photo_url,
+            owner_name=p.owner.full_name if p.owner else None
+        )
+        for p in pets
+    ]
+
+@app.get("/admin/dashboard/stats", response_model=schemas.DashboardStats)
+def get_dashboard_stats(
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(auth.get_current_user)
+):
+    auth.check_admin(admin)
+    today = date.today()
+    return schemas.DashboardStats(
+        total_users=db.query(func.count(models.User.id)).filter(models.User.status == models.UserStatus.ACTIVE).scalar(),
+        total_pets=db.query(func.count(models.Pet.id)).scalar(),
+        total_appointments=db.query(func.count(models.Appointment.id)).scalar(),
+        appointments_today=db.query(func.count(models.Appointment.id)).filter(
+            func.date(models.Appointment.date_time) == today
+        ).scalar(),
+        pending_appointments=db.query(func.count(models.Appointment.id)).filter(
+            models.Appointment.status == models.AppointmentStatus.PENDING
+        ).scalar(),
+        pending_users=db.query(func.count(models.User.id)).filter(
+            models.User.status == models.UserStatus.PENDING
+        ).scalar()
+    )
+
 @app.get("/admin/appointments", response_model=List[schemas.AppointmentOut])
 def get_all_appointments(
     db: Session = Depends(get_db), 
     admin: models.User = Depends(auth.get_current_user)
 ):
     auth.check_admin(admin)
-    return db.query(models.Appointment).all()
+    appointments = db.query(models.Appointment).all()
+    result = []
+    for a in appointments:
+        owner = a.owner
+        pet = a.pet
+        result.append(schemas.AppointmentOut(
+            id=a.id, pet_id=a.pet_id, owner_id=a.owner_id, date_time=a.date_time,
+            reason=a.reason, status=a.status,
+            owner_name=owner.full_name if owner else None,
+            pet_name=pet.name if pet else None
+        ))
+    return result
 
 @app.post("/admin/medical-records", response_model=schemas.MedicalRecordOut)
 def create_medical_record(
@@ -181,7 +280,15 @@ def update_appointment_status(
     appointment.status = new_status
     db.commit()
     db.refresh(appointment)
-    return appointment
+    owner = appointment.owner
+    pet = appointment.pet
+    result = schemas.AppointmentOut(
+        id=appointment.id, pet_id=appointment.pet_id, owner_id=appointment.owner_id,
+        date_time=appointment.date_time, reason=appointment.reason, status=appointment.status,
+        owner_name=owner.full_name if owner else None,
+        pet_name=pet.name if pet else None
+    )
+    return result
 
 # --- CLIENT ENDPOINTS (Mascotas y Citas) ---
 
@@ -229,7 +336,17 @@ def list_my_appointments(
     current_user: models.User = Depends(auth.get_current_user)
 ):
     auth.check_active(current_user)
-    return db.query(models.Appointment).filter(models.Appointment.owner_id == current_user.id).all()
+    appointments = db.query(models.Appointment).filter(models.Appointment.owner_id == current_user.id).all()
+    result = []
+    for a in appointments:
+        pet = a.pet
+        result.append(schemas.AppointmentOut(
+            id=a.id, pet_id=a.pet_id, owner_id=a.owner_id, date_time=a.date_time,
+            reason=a.reason, status=a.status,
+            owner_name=current_user.full_name,
+            pet_name=pet.name if pet else None
+        ))
+    return result
 
 @app.post("/appointments/", response_model=schemas.AppointmentOut)
 def create_appointment(
@@ -251,4 +368,10 @@ def create_appointment(
     db.add(new_appo)
     db.commit()
     db.refresh(new_appo)
-    return new_appo
+    pet = new_appo.pet
+    return schemas.AppointmentOut(
+        id=new_appo.id, pet_id=new_appo.pet_id, owner_id=new_appo.owner_id,
+        date_time=new_appo.date_time, reason=new_appo.reason, status=new_appo.status,
+        owner_name=current_user.full_name,
+        pet_name=pet.name if pet else None
+    )
