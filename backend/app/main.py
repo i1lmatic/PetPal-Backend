@@ -676,7 +676,10 @@ def create_appointment(
         owner_id=current_user.id,
         status=models.AppointmentStatus.PENDING
     )
-
+    db.add(new_appo)
+    db.commit()
+    db.refresh(new_appo)
+    return _appointment_to_out(new_appo)
 
 
 def get_my_vet_business(db: Session, current_user: models.User) -> models.Veterinary:
