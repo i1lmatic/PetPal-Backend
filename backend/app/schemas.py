@@ -93,11 +93,11 @@ class VeterinaryOut(VeterinaryBase):
 
 
 class PetBase(BaseModel):
-    name: str
-    species: str
-    breed: str
-    birth_date: str
-    weight: float
+    name: str = ""
+    species: str = ""
+    breed: str = ""
+    birth_date: str = ""
+    weight: float = 0.0
     photo_url: Optional[str] = None
 
 

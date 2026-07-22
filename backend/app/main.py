@@ -358,27 +358,32 @@ def get_all_pets(
     db: Session = Depends(get_db),
     admin: models.User = Depends(auth.get_current_user)
 ):
-    auth.check_admin(admin)
-    query = db.query(models.Pet).join(models.User)
-    if search:
-        query = query.filter(models.Pet.name.ilike(f"%{search}%"))
-    if owner_id is not None:
-        query = query.filter(models.Pet.owner_id == owner_id)
-    pets = query.all()
-    return [
-        schemas.PetWithOwner(
-            id=p.id,
-            owner_id=p.owner_id,
-            name=p.name,
-            species=p.species,
-            breed=p.breed,
-            birth_date=p.birth_date,
-            weight=p.weight,
-            photo_url=p.photo_url,
-            owner_name=p.owner.full_name if p.owner else None
-        )
-        for p in pets
-    ]
+    try:
+        auth.check_admin(admin)
+        query = db.query(models.Pet).join(models.User)
+        if search:
+            query = query.filter(models.Pet.name.ilike(f"%{search}%"))
+        if owner_id is not None:
+            query = query.filter(models.Pet.owner_id == owner_id)
+        pets = query.all()
+        return [
+            schemas.PetWithOwner(
+                id=p.id,
+                owner_id=p.owner_id,
+                name=p.name or "",
+                species=p.species or "",
+                breed=p.breed or "",
+                birth_date=p.birth_date or "",
+                weight=p.weight or 0.0,
+                photo_url=p.photo_url,
+                owner_name=p.owner.full_name if p.owner else None
+            )
+            for p in pets
+        ]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener mascotas: {str(e)}")
 
 @app.get("/admin/dashboard/stats", response_model=schemas.DashboardStats)
 def get_dashboard_stats(
@@ -419,24 +424,29 @@ def get_all_appointments(
     db: Session = Depends(get_db), 
     admin: models.User = Depends(auth.get_current_user)
 ):
-    auth.check_admin(admin)
-    appointments = db.query(models.Appointment).all()
-    result = []
-    for a in appointments:
-        owner = a.owner
-        pet = a.pet
-        has_record = db.query(models.MedicalRecord).filter(
-            models.MedicalRecord.appointment_id == a.id
-        ).first() is not None
-        result.append(schemas.AppointmentOut(
-            id=a.id, pet_id=a.pet_id, owner_id=a.owner_id, date_time=a.date_time,
-            reason=a.reason, status=a.status,
-            vet_id=a.vet_id, notes=a.notes,
-            owner_name=owner.full_name if owner else None,
-            pet_name=pet.name if pet else None,
-            has_record=has_record
-        ))
-    return result
+    try:
+        auth.check_admin(admin)
+        appointments = db.query(models.Appointment).all()
+        result = []
+        for a in appointments:
+            owner = a.owner
+            pet = a.pet
+            has_record = db.query(models.MedicalRecord).filter(
+                models.MedicalRecord.appointment_id == a.id
+            ).first() is not None
+            result.append(schemas.AppointmentOut(
+                id=a.id, pet_id=a.pet_id, owner_id=a.owner_id, date_time=a.date_time,
+                reason=a.reason or "", status=a.status,
+                vet_id=a.vet_id, notes=a.notes,
+                owner_name=owner.full_name if owner else None,
+                pet_name=pet.name if pet else None,
+                has_record=has_record
+            ))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener citas: {str(e)}")
 
 @app.post("/admin/medical-records", response_model=schemas.MedicalRecordOut)
 def create_medical_record(
@@ -567,8 +577,13 @@ def list_my_pets(
     db: Session = Depends(get_db), 
     current_user: models.User = Depends(auth.get_current_user)
 ):
-    auth.check_active(current_user)
-    return db.query(models.Pet).filter(models.Pet.owner_id == current_user.id).all()
+    try:
+        auth.check_active(current_user)
+        return db.query(models.Pet).filter(models.Pet.owner_id == current_user.id).all()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener mascotas: {str(e)}")
 
 @app.get("/pets/{pet_id}", response_model=schemas.PetOut)
 def get_pet(
@@ -631,19 +646,24 @@ def list_my_appointments(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_user)
 ):
-    auth.check_active(current_user)
-    appointments = db.query(models.Appointment).filter(models.Appointment.owner_id == current_user.id).all()
-    result = []
-    for a in appointments:
-        pet = a.pet
-        result.append(schemas.AppointmentOut(
-            id=a.id, pet_id=a.pet_id, owner_id=a.owner_id, date_time=a.date_time,
-            reason=a.reason, status=a.status,
-            vet_id=a.vet_id, notes=a.notes,
-            owner_name=current_user.full_name,
-            pet_name=pet.name if pet else None
-        ))
-    return result
+    try:
+        auth.check_active(current_user)
+        appointments = db.query(models.Appointment).filter(models.Appointment.owner_id == current_user.id).all()
+        result = []
+        for a in appointments:
+            pet = a.pet
+            result.append(schemas.AppointmentOut(
+                id=a.id, pet_id=a.pet_id, owner_id=a.owner_id, date_time=a.date_time,
+                reason=a.reason or "", status=a.status,
+                vet_id=a.vet_id, notes=a.notes,
+                owner_name=current_user.full_name,
+                pet_name=pet.name if pet else None
+            ))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener citas: {str(e)}")
 
 @app.post("/appointments/", response_model=schemas.AppointmentOut)
 def create_appointment(
