@@ -187,6 +187,19 @@ def update_my_profile(
 
 # --- ADMIN ENDPOINTS ---
 
+@app.post("/admin/clean-users")
+def clean_non_admin_users(
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(auth.get_current_user)
+):
+    auth.check_admin(admin)
+    non_admin = db.query(models.User).filter(models.User.role != models.UserRole.ADMIN).all()
+    count = len(non_admin)
+    for u in non_admin:
+        db.delete(u)
+    db.commit()
+    return {"deleted": count}
+
 @app.get("/admin/users/pending", response_model=List[schemas.UserOut])
 def get_pending_users(
     db: Session = Depends(get_db), 
