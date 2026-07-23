@@ -3,7 +3,7 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func, inspect, text
+from sqlalchemy import func, inspect, text, or_
 from typing import List
 from datetime import date, datetime, timedelta
 import os
@@ -1050,10 +1050,15 @@ def get_my_patients(
     if not vet:
         return []
 
-    pets = db.query(models.Pet).join(
-        models.MedicalRecord, models.MedicalRecord.pet_id == models.Pet.id
-    ).filter(
+    mr_pet_ids = db.query(models.MedicalRecord.pet_id).filter(
         models.MedicalRecord.vet_id == vet.id
+    )
+    appt_pet_ids = db.query(models.Appointment.pet_id).filter(
+        models.Appointment.vet_id == vet.id
+    )
+
+    pets = db.query(models.Pet).filter(
+        models.Pet.id.in_(mr_pet_ids.union(appt_pet_ids))
     ).distinct().all()
 
     return [
