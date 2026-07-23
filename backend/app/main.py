@@ -276,17 +276,39 @@ def get_all_vets(
     db: Session = Depends(get_db),
     admin: models.User = Depends(auth.get_current_user)
 ):
-    auth.check_admin(admin)
-    vets = db.query(models.Veterinary).all()
-    return [
-        schemas.VeterinaryOut(
-            id=v.id, owner_user_id=v.owner_user_id, name=v.name, address=v.address,
-            phone=v.phone, specialties=v.specialties, description=v.description,
-            working_hours=v.working_hours, photo_url=v.photo_url, status=v.status,
-            owner_name=v.owner.full_name if v.owner else None
-        )
-        for v in vets
-    ]
+    try:
+        auth.check_admin(admin)
+        vets = db.query(models.Veterinary).all()
+        return [
+            schemas.VeterinaryOut(
+                id=v.id, owner_user_id=v.owner_user_id, name=v.name, address=v.address,
+                phone=v.phone, specialties=v.specialties, description=v.description,
+                working_hours=v.working_hours, photo_url=v.photo_url, status=v.status,
+                owner_name=v.owner.full_name if v.owner else None
+            )
+            for v in vets
+        ]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener veterinarias: {str(e)}")
+
+
+@app.get("/admin/vets/pending", response_model=List[schemas.UserOut])
+def get_pending_vets(
+    db: Session = Depends(get_db),
+    admin: models.User = Depends(auth.get_current_user)
+):
+    try:
+        auth.check_admin(admin)
+        return db.query(models.User).filter(
+            models.User.role == models.UserRole.VET,
+            models.User.status == models.UserStatus.PENDING
+        ).all()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener veterinarias pendientes: {str(e)}")
 
 
 @app.patch("/admin/vets/{vet_id}/deactivate", response_model=schemas.VeterinaryOut)
@@ -345,11 +367,31 @@ def get_user_detail(
     db: Session = Depends(get_db),
     admin: models.User = Depends(auth.get_current_user)
 ):
-    auth.check_admin(admin)
-    user = db.query(models.User).options(joinedload(models.User.pets)).filter(models.User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    return user
+    try:
+        auth.check_admin(admin)
+        user = db.query(models.User).options(joinedload(models.User.pets)).filter(models.User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        pets_out = []
+        for p in user.pets:
+            pets_out.append(schemas.PetOut(
+                id=p.id, owner_id=p.owner_id,
+                name=p.name or "", species=p.species or "", breed=p.breed or "",
+                birth_date=p.birth_date or "", weight=p.weight or 0.0,
+                photo_url=p.photo_url,
+                sex=p.sex, color=p.color, size=p.size,
+                allergies=p.allergies, conditions=p.conditions,
+                microchip=p.microchip, status=p.status or "active"
+            ))
+        return schemas.UserDetail(
+            id=user.id, email=user.email, full_name=user.full_name,
+            phone=user.phone, role=user.role, status=user.status,
+            pets=pets_out
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener usuario: {str(e)}")
 
 @app.get("/admin/pets", response_model=List[schemas.PetWithOwner])
 def get_all_pets(
