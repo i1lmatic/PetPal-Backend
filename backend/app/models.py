@@ -21,6 +21,7 @@ class UserStatus(str, enum.Enum):
 class VeterinaryStatus(str, enum.Enum):
     ACTIVE = "active"
     INACTIVE = "inactive"
+    PENDING = "pending"
 
 class PetStatus(str, enum.Enum):
     ACTIVE = "active"

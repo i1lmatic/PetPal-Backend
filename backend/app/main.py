@@ -117,7 +117,7 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
     return new_user
 
 @app.post("/auth/register-vet", response_model=schemas.UserOut)
-def register_vet(user: schemas.UserCreate, db: Session = Depends(get_db)):
+def register_vet(user: schemas.VetRegisterRequest, db: Session = Depends(get_db)):
     db_user = db.query(models.User).filter(models.User.email == user.email).first()
     if db_user:
         if db_user.status == models.UserStatus.REJECTED.value:
@@ -134,6 +134,19 @@ def register_vet(user: schemas.UserCreate, db: Session = Depends(get_db)):
         status=models.UserStatus.PENDING.value
     )
     db.add(new_user)
+    db.flush()
+
+    new_vet = models.Veterinary(
+        owner_user_id=new_user.id,
+        name=user.business_name or user.full_name,
+        address=user.business_address or "",
+        phone=user.business_phone or user.phone,
+        specialties=user.business_specialties or "",
+        description=user.business_description,
+        working_hours=user.business_working_hours,
+        status=models.VeterinaryStatus.PENDING.value
+    )
+    db.add(new_vet)
     db.commit()
     db.refresh(new_user)
     return new_user
@@ -193,7 +206,15 @@ def approve_user(
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     
-    user.status = models.UserStatus.ACTIVE
+    user.status = models.UserStatus.ACTIVE.value
+
+    if user.role == models.UserRole.VET.value:
+        vet = db.query(models.Veterinary).filter(
+            models.Veterinary.owner_user_id == user.id
+        ).first()
+        if vet:
+            vet.status = models.VeterinaryStatus.ACTIVE.value
+
     db.commit()
     db.refresh(user)
     return user
@@ -208,7 +229,15 @@ def reject_user(
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
-    user.status = models.UserStatus.REJECTED
+
+    if user.role == models.UserRole.VET.value:
+        vet = db.query(models.Veterinary).filter(
+            models.Veterinary.owner_user_id == user.id
+        ).first()
+        if vet:
+            db.delete(vet)
+
+    user.status = models.UserStatus.REJECTED.value
     db.commit()
     db.refresh(user)
     return user
@@ -294,17 +323,35 @@ def get_all_vets(
         raise HTTPException(status_code=500, detail=f"Error al obtener veterinarias: {str(e)}")
 
 
-@app.get("/admin/vets/pending", response_model=List[schemas.UserOut])
+@app.get("/admin/vets/pending", response_model=List[schemas.PendingVetOut])
 def get_pending_vets(
     db: Session = Depends(get_db),
     admin: models.User = Depends(auth.get_current_user)
 ):
     try:
         auth.check_admin(admin)
-        return db.query(models.User).filter(
+        users = db.query(models.User).filter(
             models.User.role == models.UserRole.VET,
             models.User.status == models.UserStatus.PENDING
         ).all()
+        result = []
+        for u in users:
+            vet = db.query(models.Veterinary).filter(
+                models.Veterinary.owner_user_id == u.id
+            ).first()
+            result.append(schemas.PendingVetOut(
+                user_id=u.id,
+                email=u.email,
+                full_name=u.full_name,
+                phone=u.phone,
+                business_name=vet.name if vet else "",
+                business_address=vet.address if vet else "",
+                business_phone=vet.phone if vet else "",
+                business_specialties=vet.specialties if vet else "",
+                business_description=vet.description if vet else None,
+                business_working_hours=vet.working_hours if vet else None,
+            ))
+        return result
     except HTTPException:
         raise
     except Exception as e:

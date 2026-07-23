@@ -13,6 +13,28 @@ class UserCreate(UserBase):
     password: str
 
 
+class VetRegisterRequest(UserCreate):
+    business_name: str = ""
+    business_address: str = ""
+    business_phone: str = ""
+    business_specialties: str = ""
+    business_description: Optional[str] = None
+    business_working_hours: Optional[str] = None
+
+
+class PendingVetOut(BaseModel):
+    user_id: int
+    email: str
+    full_name: str
+    phone: str
+    business_name: str = ""
+    business_address: str = ""
+    business_phone: str = ""
+    business_specialties: str = ""
+    business_description: Optional[str] = None
+    business_working_hours: Optional[str] = None
+
+
 class UserUpdateProfile(BaseModel):
     full_name: Optional[str] = None
     phone: Optional[str] = None
