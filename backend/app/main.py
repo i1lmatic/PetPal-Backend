@@ -809,7 +809,13 @@ def get_my_business(
 ):
     auth.check_active(current_user)
     auth.check_vet(current_user)
-    vet = get_my_vet_business(db, current_user)
+
+    vet = db.query(models.Veterinary).filter(
+        models.Veterinary.owner_user_id == current_user.id
+    ).first()
+    if not vet:
+        raise HTTPException(status_code=404, detail="No tienes un negocio registrado. Crea tu veterinaria primero.")
+
     return schemas.VeterinaryOut(
         id=vet.id, owner_user_id=vet.owner_user_id, name=vet.name, address=vet.address,
         phone=vet.phone, specialties=vet.specialties, description=vet.description,
@@ -906,7 +912,12 @@ def get_my_vet_appointments(
 ):
     auth.check_active(current_user)
     auth.check_vet(current_user)
-    vet = get_my_vet_business(db, current_user)
+
+    vet = db.query(models.Veterinary).filter(
+        models.Veterinary.owner_user_id == current_user.id
+    ).first()
+    if not vet:
+        return []
 
     appointments = db.query(models.Appointment).filter(
         models.Appointment.vet_id == vet.id
@@ -1019,7 +1030,12 @@ def get_my_patients(
 ):
     auth.check_active(current_user)
     auth.check_vet(current_user)
-    vet = get_my_vet_business(db, current_user)
+
+    vet = db.query(models.Veterinary).filter(
+        models.Veterinary.owner_user_id == current_user.id
+    ).first()
+    if not vet:
+        return []
 
     pets = db.query(models.Pet).join(
         models.MedicalRecord, models.MedicalRecord.pet_id == models.Pet.id
