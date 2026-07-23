@@ -825,6 +825,33 @@ def update_my_business(
         owner_name=current_user.full_name
     )
 
+
+@app.patch("/vet/business/deactivate", response_model=schemas.VeterinaryOut)
+def deactivate_my_business(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user)
+):
+    auth.check_active(current_user)
+    auth.check_vet(current_user)
+    vet = get_my_vet_business(db, current_user)
+
+    vet.status = models.VeterinaryStatus.INACTIVE.value
+
+    db.query(models.Appointment).filter(
+        models.Appointment.vet_id == vet.id,
+        models.Appointment.status == models.AppointmentStatus.PENDING.value
+    ).update({"status": models.AppointmentStatus.CANCELLED.value}, synchronize_session=False)
+
+    db.commit()
+    db.refresh(vet)
+    return schemas.VeterinaryOut(
+        id=vet.id, owner_user_id=vet.owner_user_id, name=vet.name, address=vet.address,
+        phone=vet.phone, specialties=vet.specialties, description=vet.description,
+        working_hours=vet.working_hours, photo_url=vet.photo_url, status=vet.status,
+        owner_name=current_user.full_name
+    )
+
+
 @app.get("/vet/appointments", response_model=List[schemas.AppointmentOut])
 def get_my_vet_appointments(
     db: Session = Depends(get_db),
