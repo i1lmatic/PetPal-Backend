@@ -775,6 +775,52 @@ def get_vet_detail(
         raise HTTPException(status_code=500, detail=f"Error al obtener detalles de veterinaria: {str(e)}")
 
 
+@app.get("/vets/{vet_id}/slots")
+def get_vet_slots(
+    vet_id: int,
+    date: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user)
+):
+    try:
+        auth.check_active(current_user)
+        vet = db.query(models.Veterinary).filter(models.Veterinary.id == vet_id).first()
+        if not vet:
+            raise HTTPException(status_code=404, detail="Veterinaria no encontrada")
+
+        slots = []
+        booked = []
+        if vet.working_hours:
+            match = re.match(r"(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})", vet.working_hours)
+            if match:
+                open_h, open_m, close_h, close_m = map(int, match.groups())
+                date_obj = datetime.strptime(date, "%Y-%m-%d").date()
+                existing_appts = db.query(models.Appointment).filter(
+                    models.Appointment.vet_id == vet.id,
+                    func.date(models.Appointment.date_time) == date_obj,
+                    models.Appointment.status.in_([models.AppointmentStatus.PENDING.value, models.AppointmentStatus.CONFIRMED.value])
+                ).all()
+                booked_hours = set()
+                for a in existing_appts:
+                    booked_hours.add(f"{a.date_time.hour:02d}:{a.date_time.minute:02d}")
+
+                current_minutes = open_h * 60 + open_m
+                close_minutes = close_h * 60 + close_m
+                while current_minutes <= close_minutes:
+                    hour = current_minutes // 60
+                    minute = current_minutes % 60
+                    slot_str = f"{hour:02d}:{minute:02d}"
+                    slots.append(slot_str)
+                    if slot_str in booked_hours:
+                        booked.append(slot_str)
+                    current_minutes += 30
+
+        return {"working_hours": vet.working_hours or "", "slots": slots, "booked": booked}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener horarios: {str(e)}")
+
 
 # --- CLIENT ENDPOINTS (Mascotas y Citas) ---
 
@@ -948,6 +994,18 @@ def create_appointment(
                         status_code=400,
                         detail=f"La veterinaria atiende de {vet.working_hours}. Selecciona un horario dentro de ese rango."
                     )
+
+        conflict = db.query(models.Appointment).filter(
+            models.Appointment.vet_id == vet.id,
+            func.date(models.Appointment.date_time) == appointment.date_time.date(),
+            models.Appointment.status.in_([models.AppointmentStatus.PENDING.value, models.AppointmentStatus.CONFIRMED.value]),
+            func.abs(func.extract('epoch', models.Appointment.date_time - appointment.date_time)) < 3600
+        ).first()
+        if conflict:
+            raise HTTPException(
+                status_code=400,
+                detail="Ese horario ya está ocupado. La veterinaria ya tiene una cita agendada cerca de esa hora."
+            )
 
         new_appo = models.Appointment(
             **appointment.dict(), 
