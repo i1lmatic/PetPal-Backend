@@ -108,7 +108,7 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
         full_name=user.full_name,
         phone=user.phone,
         role=models.UserRole.ADMIN if is_first_user else models.UserRole.CLIENT,
-        status=models.UserStatus.ACTIVE if is_first_user else models.UserStatus.PENDING
+        status=models.UserStatus.ACTIVE
     )
     db.add(new_user)
     db.commit()
