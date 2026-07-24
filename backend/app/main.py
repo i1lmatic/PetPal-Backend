@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, inspect, text, or_
 from typing import List
 from datetime import date, datetime, timedelta
-import os
+import os, re
 
 from . import models, schemas, auth, database
 from .database import engine, get_db, SessionLocal
@@ -915,35 +915,53 @@ def create_appointment(
     db: Session = Depends(get_db), 
     current_user: models.User = Depends(auth.get_current_user)
 ):
-    auth.check_active(current_user)
-    # Verificar que la mascota le pertenezca
-    pet = db.query(models.Pet).filter(models.Pet.id == appointment.pet_id, models.Pet.owner_id == current_user.id).first()
-    if not pet:
-        raise HTTPException(status_code=404, detail="Mascota no encontrada")
+    try:
+        auth.check_active(current_user)
 
-    # Verificar que el vet exista y esté activo
-    vet = db.query(models.Veterinary).filter(models.Veterinary.id == appointment.vet_id).first()
-    if not vet:
-        raise HTTPException(status_code=404, detail="Veterinaria no encontrada")
-    if vet.status != models.VeterinaryStatus.ACTIVE.value:
-        raise HTTPException(status_code=400, detail="Esta veterinaria no está disponible actualmente")
+        pet = db.query(models.Pet).filter(models.Pet.id == appointment.pet_id, models.Pet.owner_id == current_user.id).first()
+        if not pet:
+            raise HTTPException(status_code=404, detail="Mascota no encontrada")
 
-    # Validar fecha: no en el pasado, no más de 30 días en el futuro
-    now = datetime.utcnow()
-    if appointment.date_time < now:
-        raise HTTPException(status_code=400, detail="No puedes agendar una cita en el pasado")
-    if appointment.date_time > now + timedelta(days=30):
-        raise HTTPException(status_code=400, detail="Las citas solo se pueden agendar hasta 30 días en el futuro")
+        vet = db.query(models.Veterinary).filter(models.Veterinary.id == appointment.vet_id).first()
+        if not vet:
+            raise HTTPException(status_code=404, detail="Veterinaria no encontrada")
+        if vet.status != models.VeterinaryStatus.ACTIVE.value:
+            raise HTTPException(status_code=400, detail="Esta veterinaria no está disponible actualmente")
 
-    new_appo = models.Appointment(
-        **appointment.dict(), 
-        owner_id=current_user.id,
-        status=models.AppointmentStatus.PENDING.value
-    )
-    db.add(new_appo)
-    db.commit()
-    db.refresh(new_appo)
-    return _appointment_to_out(new_appo, db)
+        now = datetime.utcnow()
+        if appointment.date_time.date() < now.date():
+            raise HTTPException(status_code=400, detail="No puedes agendar una cita en una fecha pasada")
+        if appointment.date_time.date() == now.date() and appointment.date_time.time() < now.time():
+            raise HTTPException(status_code=400, detail="No puedes agendar una cita en un horario que ya pasó")
+        if appointment.date_time > now + timedelta(days=30):
+            raise HTTPException(status_code=400, detail="Las citas solo se pueden agendar hasta 30 días en el futuro")
+
+        if vet.working_hours:
+            match = re.match(r"(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})", vet.working_hours)
+            if match:
+                open_h, open_m, close_h, close_m = map(int, match.groups())
+                appt_minutes = appointment.date_time.hour * 60 + appointment.date_time.minute
+                open_minutes = open_h * 60 + open_m
+                close_minutes = close_h * 60 + close_m
+                if not (open_minutes <= appt_minutes <= close_minutes):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"La veterinaria atiende de {vet.working_hours}. Selecciona un horario dentro de ese rango."
+                    )
+
+        new_appo = models.Appointment(
+            **appointment.dict(), 
+            owner_id=current_user.id,
+            status=models.AppointmentStatus.PENDING.value
+        )
+        db.add(new_appo)
+        db.commit()
+        db.refresh(new_appo)
+        return _appointment_to_out(new_appo, db)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al agendar cita: {str(e)}")
 
 
 def get_my_vet_business(db: Session, current_user: models.User) -> models.Veterinary:
