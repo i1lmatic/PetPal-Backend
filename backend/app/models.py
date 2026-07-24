@@ -44,6 +44,7 @@ class User(Base):
     phone = Column(String)
     role = Column(String, default=UserRole.CLIENT.value)
     status = Column(String, default=UserStatus.PENDING.value)
+    accepted_terms = Column(Integer, default=0)
 
     pets = relationship("Pet", back_populates="owner")
     appointments = relationship("Appointment", back_populates="owner")

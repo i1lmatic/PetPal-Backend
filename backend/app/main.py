@@ -64,6 +64,9 @@ async def lifespan(app: FastAPI):
         add_column_if_missing("appointments", "vet_id", "ALTER TABLE appointments ADD COLUMN vet_id INTEGER")
         add_column_if_missing("appointments", "notes", "ALTER TABLE appointments ADD COLUMN notes VARCHAR")
 
+        # Users
+        add_column_if_missing("users", "accepted_terms", "ALTER TABLE users ADD COLUMN accepted_terms INTEGER DEFAULT 0")
+
         # Medical records
         add_column_if_missing("medical_records", "vet_id", "ALTER TABLE medical_records ADD COLUMN vet_id INTEGER")
         add_column_if_missing(
@@ -98,6 +101,9 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
         if db_user.status == models.UserStatus.REJECTED:
             raise HTTPException(status_code=400, detail="Esta cuenta fue rechazada. Contacte al administrador.")
         raise HTTPException(status_code=400, detail="Email ya registrado")
+
+    if not user.accepted_terms:
+        raise HTTPException(status_code=400, detail="Debes aceptar los Términos y Condiciones para registrarte")
     
     hashed_pwd = auth.get_password_hash(user.password)
     existing_admin = db.query(models.User).filter(models.User.role == models.UserRole.ADMIN).first()
@@ -108,7 +114,8 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
         full_name=user.full_name,
         phone=user.phone,
         role=models.UserRole.ADMIN if is_first_user else models.UserRole.CLIENT,
-        status=models.UserStatus.ACTIVE
+        status=models.UserStatus.ACTIVE,
+        accepted_terms=1
     )
     db.add(new_user)
     db.commit()
@@ -123,6 +130,9 @@ def register_vet(user: schemas.VetRegisterRequest, db: Session = Depends(get_db)
             raise HTTPException(status_code=400, detail="Esta cuenta fue rechazada. Contacte al administrador.")
         raise HTTPException(status_code=400, detail="Email ya registrado")
 
+    if not user.accepted_terms:
+        raise HTTPException(status_code=400, detail="Debes aceptar los Términos y Condiciones para registrarte")
+
     hashed_pwd = auth.get_password_hash(user.password)
     new_user = models.User(
         email=user.email,
@@ -130,7 +140,8 @@ def register_vet(user: schemas.VetRegisterRequest, db: Session = Depends(get_db)
         full_name=user.full_name,
         phone=user.phone,
         role=models.UserRole.VET.value,
-        status=models.UserStatus.PENDING.value
+        status=models.UserStatus.PENDING.value,
+        accepted_terms=1
     )
     db.add(new_user)
     db.flush()
